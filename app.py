@@ -14,66 +14,93 @@ MUSIC_TRACKS = [
     "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3",
 ]
 
-SEARCH_QUERIES = [
-    "best life advice motivational speech",
-    "entrepreneur success mindset talk",
-    "billionaire advice young people",
-    "great sportsman motivational speech",
-    "business leader wisdom advice",
-    "motivational interview success tips",
+QUOTES = [
+    "Success is not final, failure is not fatal.",
+    "The harder you work, the luckier you get.",
+    "Dream big. Start small. Act now.",
+    "Your only limit is your mind.",
+    "Push yourself because no one else will.",
+    "Great things never come from comfort zones.",
+    "It always seems impossible until it's done.",
+    "Don't watch the clock. Do what it does. Keep going.",
+    "Believe you can and you're halfway there.",
+    "The secret of getting ahead is getting started.",
+    "Success usually comes to those who are too busy to be looking for it.",
+    "The way to get started is to quit talking and begin doing.",
+]
+
+PEXELS_QUERIES = [
+    "motivation success",
+    "nature inspiring",
+    "city sunrise",
+    "mountain adventure",
+    "ocean waves calm",
+    "fitness workout energy",
 ]
 
 @app.route('/')
 def health():
     return jsonify({"status": "running"})
 
-@app.route('/get-video', methods=['GET'])
+@app.route('/get-video', methods=['POST'])
 def get_video():
+    data = request.json
+    pexels_key = data.get('pexels_key')
+    
     tmpdir = tempfile.mkdtemp()
-    video_path = os.path.join(tmpdir, 'video.%(ext)s')
-    final_video = os.path.join(tmpdir, 'video.mp4')
+    video_path = os.path.join(tmpdir, 'video.mp4')
     music_path = os.path.join(tmpdir, 'music.mp3')
     output_path = os.path.join(tmpdir, 'output.mp4')
 
-    query = random.choice(SEARCH_QUERIES)
-
     try:
-        # Download video using yt-dlp (simplified command)
-        download_cmd = [
-            'yt-dlp',
-            f'ytsearch3:{query}',
-            '--format', 'bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]/best',
-            '--no-playlist',
-            '-o', video_path,
-            '--max-downloads', '1',
-            '--no-warnings',
-            '--merge-output-format', 'mp4',
-        ]
-        subprocess.run(download_cmd, timeout=120, check=True)
+        # Search Pexels for video
+        query = random.choice(PEXELS_QUERIES)
+        headers = {'Authorization': pexels_key}
+        r = requests.get(
+            'https://api.pexels.com/videos/search',
+            headers=headers,
+            params={'query': query, 'orientation': 'portrait', 'per_page': 10, 'size': 'medium'},
+            timeout=30
+        )
+        videos = r.json()['videos']
+        video = random.choice(videos)
+        video_file = next((f for f in video['video_files'] if f['quality'] == 'sd' and f['file_type'] == 'video/mp4'), video['video_files'][0])
+        
+        # Download video
+        vr = requests.get(video_file['link'], timeout=60)
+        with open(video_path, 'wb') as f:
+            f.write(vr.content)
 
-        # Find the downloaded file
-        for f in os.listdir(tmpdir):
-            if f.startswith('video') and f.endswith('.mp4'):
-                final_video = os.path.join(tmpdir, f)
-                break
-
-        # Download random music
+        # Download music
         music_url = random.choice(MUSIC_TRACKS)
-        r = requests.get(music_url, timeout=30)
+        mr = requests.get(music_url, timeout=30)
         with open(music_path, 'wb') as f:
-            f.write(r.content)
+            f.write(mr.content)
 
-        # Mix video with background music + crop to vertical
+        # Pick random quote
+        quote = random.choice(QUOTES)
+        
+        # Split quote into two lines if long
+        words = quote.split()
+        mid = len(words) // 2
+        line1 = ' '.join(words[:mid])
+        line2 = ' '.join(words[mid:])
+        
+        # FFmpeg: crop to vertical + add text + add music
         subprocess.run([
-            'ffmpeg', '-i', final_video,
+            'ffmpeg', '-i', video_path,
             '-i', music_path,
             '-filter_complex',
-            '[0:v]crop=ih*9/16:ih,scale=1080:1920[v];[1:a]volume=0.2[music];[0:a]volume=1.0[orig];[orig][music]amix=inputs=2:duration=first[a]',
+            f'[0:v]crop=ih*9/16:ih,scale=1080:1920[base];'
+            f'[base]drawtext=text=\'{line1}\':fontcolor=white:fontsize=60:x=(w-text_w)/2:y=(h/2)-80:box=1:boxcolor=black@0.5:boxborderw=10,'
+            f'drawtext=text=\'{line2}\':fontcolor=white:fontsize=60:x=(w-text_w)/2:y=(h/2)+20:box=1:boxcolor=black@0.5:boxborderw=10,'
+            f'drawtext=text=\'Brilliant Minds\':fontcolor=gold:fontsize=45:x=(w-text_w)/2:y=100:box=1:boxcolor=black@0.6:boxborderw=8[v];'
+            f'[1:a]volume=0.3[music];[0:a]volume=0.0[orig];[music]anull[a]',
             '-map', '[v]',
             '-map', '[a]',
             '-c:v', 'libx264',
             '-c:a', 'aac',
-            '-t', '60',
+            '-t', '59',
             '-shortest',
             output_path
         ], timeout=180, check=True)
