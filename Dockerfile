@@ -1,8 +1,13 @@
-FROM jrottenberg/ffmpeg:4.4-ubuntu
+FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y python3 python3-pip
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
 COPY requirements.txt .
-RUN pip3 install -r requirements.txt
+RUN pip install -r requirements.txt
 COPY app.py .
+
 EXPOSE 5000
-CMD ["python3", "app.py"]
+CMD ["python", "app.py"]
